@@ -49,7 +49,8 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict:
                     # Un login invalid returnează 200 (reîncarcă pagina de login cu o eroare).
                     # Un login valid returnează 302 (redirect către cont).
                     if resp.status != 302:
-                        _LOGGER.error("Logare eșuată. Status primit: %s", resp.status)
+                        html_error = await resp.text()
+                        _LOGGER.error("Logare eșuată (Status %s). Răspuns server: %s", resp.status, html_error[:300])
                         raise ValueError("invalid_auth")
 
             # Extragem cookie-urile rezultate în urma logării
