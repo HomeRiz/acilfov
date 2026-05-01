@@ -44,9 +44,8 @@ class ACIlfovBaseSensor(Entity):
         """Generarea headerelor necesare pentru cereri."""
         return {
             "Cookie": self._cookie,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json;charset=UTF-8"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*"
         }
 
 class ACIlfovSoldSensor(ACIlfovBaseSensor):
@@ -108,33 +107,32 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     def icon(self): return "mdi:cash-check"
 
     async def async_update(self):
-        # Folosim URL-ul simplu pentru Plati, asa cum a fost extras initial
-        url = URL_PLATI
+        # Lipim parametrii exacți pe care i-ai extras direct în URL
+        # %24 este simbolul '$' codificat pentru web
+        parametri_url = f"codClient={self._cod}&nrContract={self._contract}&%24qd=false&%24action=LOAD_RECORDS&%24locale=en&%24ls=false&%24to=500&%24order=DATA_PLATA+desc"
+        url = f"{URL_PLATI}?{parametri_url}"
+
         try:
             async with aiohttp.ClientSession() as session:
                 with async_timeout.timeout(15):
-                    # Încercăm metoda GET
-                    async with session.get(url, headers=self._headers) as resp:
+                    # Facem POST direct cu link-ul complet (fără body)
+                    async with session.post(url, headers=self._headers) as resp:
                         if resp.status == 200:
-                            await self._parse_data(await resp.json())
-                        else:
-                            # Dacă eșuează, înregistrăm eroarea de la server în log-uri
-                            err_text = await resp.text()
-                            _LOGGER.error("Eroare GET Plati HTTP %s: %s", resp.status, err_text[:250])
-                            
-                            # Fallback pe POST cu un body gol
-                            async with session.post(url, headers=self._headers, json={}) as resp2:
+                            data = await resp.json()
+                            await self._parse_data(data)
+                        elif resp.status == 405:
+                            # Fallback pe GET dacă respinge POST-ul
+                            async with session.get(url, headers=self._headers) as resp2:
                                 if resp2.status == 200:
-                                    await self._parse_data(await resp2.json())
-                                else:
-                                    err_text2 = await resp2.text()
-                                    _LOGGER.error("Eroare POST Plati HTTP %s: %s", resp2.status, err_text2[:250])
+                                    data = await resp2.json()
+                                    await self._parse_data(data)
+                        else:
+                            _LOGGER.error("Eroare HTTP Plata: %s", resp.status)
         except Exception as e: 
             _LOGGER.error("Eroare conexiune Plata: %s", e)
 
     async def _parse_data(self, data):
-        """Metodă separată pentru a citi JSON-ul dacă cererea a avut succes."""
-        # Verificăm dacă JSON-ul are secțiunea "records" și dacă nu este goală
+        """Metodă pentru a citi JSON-ul și a seta atributele."""
         if data and data.get("records") and len(data["records"]) > 0:
             last_row = data["records"][0].get("row", {})
             self._state = last_row.get("valoarePlata")
@@ -147,4 +145,4 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
             self._attributes["document"] = last_row.get("documentPlata")
             self._attributes["metoda"] = last_row.get("canalIncasare")
         else:
-            _LOGGER.error("Plati: Serverul a răspuns cu OK, dar lista de plăți este goală.")
+            _LOGGER.error("Plati: Lista este tot goală. Verifică dacă există plăți pe cont.")
