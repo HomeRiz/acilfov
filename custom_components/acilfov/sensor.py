@@ -17,7 +17,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         _LOGGER.error("Date de configurare lipsă în configuration.yaml pentru AC Ilfov")
         return
 
-    # Adăugăm toți cei 3 senzori
+    # Adăugăm toți cei 3 senzori la pornire
     sensors = [
         ACIlfovSoldSensor(cookies, cod_client, nr_contract),
         ACIlfovIndexSensor(cookies, cod_client),
@@ -44,8 +44,9 @@ class ACIlfovBaseSensor(Entity):
         """Generarea headerelor necesare pentru cereri."""
         return {
             "Cookie": self._cookie,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json, text/plain, */*"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json;charset=UTF-8"
         }
 
 class ACIlfovSoldSensor(ACIlfovBaseSensor):
@@ -107,21 +108,18 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     def icon(self): return "mdi:cash-check"
 
     async def async_update(self):
-        # Lipim parametrii exacți pe care i-ai extras direct în URL
-        # %24 este simbolul '$' codificat pentru web
+        # Lipim parametrii exacți pe care i-ai extras direct în URL (Soluția testată)
         parametri_url = f"codClient={self._cod}&nrContract={self._contract}&%24qd=false&%24action=LOAD_RECORDS&%24locale=en&%24ls=false&%24to=500&%24order=DATA_PLATA+desc"
         url = f"{URL_PLATI}?{parametri_url}"
 
         try:
             async with aiohttp.ClientSession() as session:
                 with async_timeout.timeout(15):
-                    # Facem POST direct cu link-ul complet (fără body)
                     async with session.post(url, headers=self._headers) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             await self._parse_data(data)
                         elif resp.status == 405:
-                            # Fallback pe GET dacă respinge POST-ul
                             async with session.get(url, headers=self._headers) as resp2:
                                 if resp2.status == 200:
                                     data = await resp2.json()
