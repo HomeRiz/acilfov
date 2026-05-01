@@ -11,7 +11,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     
     # AICI pui valorile copiate din browser
     # Formatul trebuie să fie: "NUME1=VALOARE1; NUME2=VALOARE2"
-    my_cookies = "SELF_UTI_COOKIE=WXtaaMmMmLujphIUTjXANorvOJuURJAOjAFOsqHhRWWYsEinhXfOvetDLlab; sl-session=h0rNCaYw9mnrTknRgt4UBA=="
+    my_cookies = "SELF_UTI_COOKIE=xxxxxxx; sl-session=xxxxxxx"
     
     # Datele identificate de tine în tab-ul Network
     cod_client = "37843"
