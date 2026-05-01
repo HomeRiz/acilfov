@@ -1,11 +1,13 @@
 import logging
 import async_timeout
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timedelta
 from homeassistant.helpers.entity import Entity
 from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI
 
 _LOGGER = logging.getLogger(__name__)
+
+URL_CONTRACT = "https://acilfov.emsys.ro/self_utilities/rest/self/contract/getListaCodClientContracte"
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Setarea platformei de senzori."""
@@ -17,10 +19,11 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         _LOGGER.error("Date de configurare lipsă în configuration.yaml pentru AC Ilfov")
         return
 
-    # Adăugăm toți cei 3 senzori la pornire
+    # Încărcăm toți cei 4 senzori!
     sensors = [
         ACIlfovSoldSensor(cookies, cod_client, nr_contract),
         ACIlfovIndexSensor(cookies, cod_client),
+        ACIlfovContractSensor(cookies, cod_client),
         ACIlfovLastPaymentSensor(cookies, cod_client, nr_contract)
     ]
     async_add_entities(sensors, True)
@@ -41,12 +44,11 @@ class ACIlfovBaseSensor(Entity):
 
     @property
     def _headers(self):
-        """Generarea headerelor necesare pentru cereri."""
+        """Generarea headerelor standard."""
         return {
             "Cookie": self._cookie,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json;charset=UTF-8"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "*/*"
         }
 
 class ACIlfovSoldSensor(ACIlfovBaseSensor):
@@ -93,6 +95,34 @@ class ACIlfovIndexSensor(ACIlfovBaseSensor):
                             self._attributes["mesaj"] = data.get("response")
         except Exception as e: _LOGGER.error("Eroare Index: %s", e)
 
+class ACIlfovContractSensor(ACIlfovBaseSensor):
+    @property
+    def name(self): return "AC Ilfov Detalii Contract"
+    @property
+    def unique_id(self): return f"acilfov_contract_{self._cod}"
+    @property
+    def icon(self): return "mdi:file-document-outline"
+
+    async def async_update(self):
+        try:
+            async with aiohttp.ClientSession() as session:
+                with async_timeout.timeout(15):
+                    async with session.get(URL_CONTRACT, headers=self._headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and isinstance(data, list) and len(data) > 0:
+                                contract_data = data[0]
+                                self._state = contract_data.get("stareContract", "Necunoscut")
+                                self._attributes["client"] = contract_data.get("denClient")
+                                self._attributes["adresa"] = contract_data.get("adrClient")
+                                self._attributes["numar_contract"] = contract_data.get("nrContract")
+                                
+                                raw_date = contract_data.get("dataIncContract", "")
+                                if raw_date and "/Date(" in raw_date:
+                                    ts = int(raw_date.replace("/Date(", "").replace(")/", "")) / 1000
+                                    self._attributes["data_inceput"] = datetime.fromtimestamp(ts).strftime('%d-%m-%Y')
+        except Exception as e: _LOGGER.error("Eroare conexiune Contract: %s", e)
+
 class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     def __init__(self, cookie, cod, contract):
         super().__init__(cookie, cod)
@@ -108,24 +138,42 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     def icon(self): return "mdi:cash-check"
 
     async def async_update(self):
-        # Lipim parametrii exacți pe care i-ai extras direct în URL (Soluția testată)
-        parametri_url = f"codClient={self._cod}&nrContract={self._contract}&%24qd=false&%24action=LOAD_RECORDS&%24locale=en&%24ls=false&%24to=500&%24order=DATA_PLATA+desc"
-        url = f"{URL_PLATI}?{parametri_url}"
+        url = URL_PLATI
+        
+        # Generăm datele de start (acum 6 luni) și end (acum) în formatul HTTP cerut de EMSYS
+        now = datetime.utcnow()
+        start_date = now - timedelta(days=180)
+        date_format = '%a, %d %b %Y %H:%M:%S GMT'
+        
+        # Adăugăm headerele custom găsite de tine
+        headers = self._headers.copy()
+        headers.update({
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "codclient": str(self._cod),
+            "nrcontract": str(self._contract),
+            "startdate": start_date.strftime(date_format),
+            "enddate": now.strftime(date_format)
+        })
+
+        # Payload-ul exact extras de tine
+        payload = {
+            "$qd": "false",
+            "$action": "LOAD_RECORDS",
+            "$locale": "en",
+            "$ls": "false",
+            "$to": "500",
+            "$order": "DATA_PLATA desc"
+        }
 
         try:
             async with aiohttp.ClientSession() as session:
                 with async_timeout.timeout(15):
-                    async with session.post(url, headers=self._headers) as resp:
+                    # Trimitem POST-ul cu toate secretele descoperite!
+                    async with session.post(url, headers=headers, data=payload) as resp:
                         if resp.status == 200:
-                            data = await resp.json()
-                            await self._parse_data(data)
-                        elif resp.status == 405:
-                            async with session.get(url, headers=self._headers) as resp2:
-                                if resp2.status == 200:
-                                    data = await resp2.json()
-                                    await self._parse_data(data)
+                            await self._parse_data(await resp.json())
                         else:
-                            _LOGGER.error("Eroare HTTP Plata: %s", resp.status)
+                            _LOGGER.error("Eroare Plata (Status %s)", resp.status)
         except Exception as e: 
             _LOGGER.error("Eroare conexiune Plata: %s", e)
 
