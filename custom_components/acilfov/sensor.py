@@ -7,14 +7,16 @@ from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI, URL_CONTRACT
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Setarea platformei de senzori."""
-    cookies = config.get("cookies")
-    cod_client = config.get("cod_client")
-    nr_contract = config.get("nr_contract")
+async def async_setup_entry(hass, config_entry, async_add_entities):
+    """Setarea platformei de senzori prin Config Flow (Interfața grafică)."""
+    
+    # Acum preluăm datele direct din ce ai introdus în fereastra de instalare
+    cookies = config_entry.data.get("cookies")
+    cod_client = config_entry.data.get("cod_client")
+    nr_contract = config_entry.data.get("nr_contract")
 
     if not cookies or not cod_client:
-        _LOGGER.error("Date de configurare lipsă în configuration.yaml pentru AC Ilfov")
+        _LOGGER.error("Date de configurare lipsă pentru AC Ilfov")
         return
 
     # Încărcăm toți cei 4 senzori
@@ -138,12 +140,10 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     async def async_update(self):
         url = URL_PLATI
         
-        # Generăm datele de start (acum 6 luni) și end (acum) în formatul HTTP cerut de EMSYS
         now = datetime.utcnow()
         start_date = now - timedelta(days=180)
         date_format = '%a, %d %b %Y %H:%M:%S GMT'
         
-        # Adăugăm headerele custom
         headers = self._headers.copy()
         headers.update({
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
@@ -153,7 +153,6 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
             "enddate": now.strftime(date_format)
         })
 
-        # Payload-ul exact
         payload = {
             "$qd": "false",
             "$action": "LOAD_RECORDS",
@@ -166,7 +165,6 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
         try:
             async with aiohttp.ClientSession() as session:
                 with async_timeout.timeout(15):
-                    # Trimitem POST-ul
                     async with session.post(url, headers=headers, data=payload) as resp:
                         if resp.status == 200:
                             await self._parse_data(await resp.json())
