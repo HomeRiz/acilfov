@@ -2,11 +2,11 @@
   "domain": "acilfov",
   "name": "AC Ilfov",
   "codeowners": ["@HomeRiz"],
-  "config_flow": false,
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/HomeRiz/acilfov",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/HomeRiz/acilfov/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

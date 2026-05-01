@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Autentificare AC Ilfov",
+        "description": "Introduceți adresa de email și parola folosite pe portalul acilfov.emsys.ro.",
+        "data": {
+          "email": "Adresă de Email",
+          "password": "Parolă"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nu m-am putut conecta la serverul AC Ilfov.",
+      "invalid_auth": "Email sau parolă incorecte.",
+      "unknown": "A apărut o eroare neașteptată."
+    },
+    "abort": {
+      "already_configured": "Acest cont este deja configurat."
+    }
+  }
+}

@@ -3,11 +3,9 @@ import async_timeout
 import aiohttp
 from datetime import datetime, timedelta
 from homeassistant.helpers.entity import Entity
-from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI
+from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI, URL_CONTRACT
 
 _LOGGER = logging.getLogger(__name__)
-
-URL_CONTRACT = "https://acilfov.emsys.ro/self_utilities/rest/self/contract/getListaCodClientContracte"
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Setarea platformei de senzori."""
@@ -19,7 +17,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         _LOGGER.error("Date de configurare lipsă în configuration.yaml pentru AC Ilfov")
         return
 
-    # Încărcăm toți cei 4 senzori!
+    # Încărcăm toți cei 4 senzori
     sensors = [
         ACIlfovSoldSensor(cookies, cod_client, nr_contract),
         ACIlfovIndexSensor(cookies, cod_client),
@@ -145,7 +143,7 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
         start_date = now - timedelta(days=180)
         date_format = '%a, %d %b %Y %H:%M:%S GMT'
         
-        # Adăugăm headerele custom găsite de tine
+        # Adăugăm headerele custom
         headers = self._headers.copy()
         headers.update({
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
@@ -155,7 +153,7 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
             "enddate": now.strftime(date_format)
         })
 
-        # Payload-ul exact extras de tine
+        # Payload-ul exact
         payload = {
             "$qd": "false",
             "$action": "LOAD_RECORDS",
@@ -168,7 +166,7 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
         try:
             async with aiohttp.ClientSession() as session:
                 with async_timeout.timeout(15):
-                    # Trimitem POST-ul cu toate secretele descoperite!
+                    # Trimitem POST-ul
                     async with session.post(url, headers=headers, data=payload) as resp:
                         if resp.status == 200:
                             await self._parse_data(await resp.json())
