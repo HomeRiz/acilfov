@@ -1,0 +1,10 @@
+{
+  "domain": "acilfov",
+  "name": "AC Ilfov",
+  "codeowners": ["@HomeRiz"],
+  "documentation": "https://github.com/HomeRiz/acilfov",
+  "iot_class": "cloud_polling",
+  "version": "1.0.0",
+  "requirements": [],
+  "dependencies": []
+}
