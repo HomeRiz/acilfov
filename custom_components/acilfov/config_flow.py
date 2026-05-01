@@ -11,92 +11,55 @@ from .const import DOMAIN, BASE_URL
 
 _LOGGER = logging.getLogger(__name__)
 
-# URL-ul exact de login extras de tine
-LOGIN_URL = "https://acilfov.emsys.ro/self_utilities/login"
-# URL-ul folosit automat de site dupa login pentru a afla contractul
-CONTRACTS_URL = f"{BASE_URL}/contract/getListaCodClientContracte"
+URL_CONTRACT = f"{BASE_URL}/contract/getListaCodClientContracte"
 
+# Schema cere acum Cookie, Cod și Contract (în loc de Email/Parolă)
 DATA_SCHEMA = vol.Schema({
-    vol.Required("email"): str,
-    vol.Required("password"): str,
+    vol.Required("cookies"): str,
+    vol.Required("cod_client"): str,
+    vol.Required("nr_contract"): str,
 })
 
 async def validate_input(hass: HomeAssistant, data: dict) -> dict:
-    """Validează datele de login și extrage cookie-ul și detaliile clientului."""
-    email = data["email"]
-    password = data["password"]
-
-    # 1. Pregătim datele pentru trimitere, formatate cum a arătat Payload-ul tau
-    payload = {
-        "j_username": email,
-        "j_password": password
-    }
-
+    """Validează datele verificând dacă putem accesa API-ul cu acest cookie."""
     headers = {
+        "Cookie": data["cookies"],
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Accept": "application/json, text/plain, */*"
     }
 
     try:
-        # Folosim CookieJar pentru a stoca automat cookie-urile returnate (ex: SELF_UTI_COOKIE)
-        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
+        async with aiohttp.ClientSession() as session:
             with async_timeout.timeout(15):
-                # Pasul 1: Facem cererea de logare.
-                # Allow_redirects=False deoarece ai vazut acel 302 Found. Vrem să prindem răspunsul înainte să ne mute paginile.
-                async with session.post(LOGIN_URL, headers=headers, data=payload, allow_redirects=False) as resp:
-                    
-                    # Verificăm dacă logarea a reușit
-                    # Un login invalid returnează 200 (reîncarcă pagina de login cu o eroare).
-                    # Un login valid returnează 302 (redirect către cont).
-                    if resp.status != 302:
-                        html_error = await resp.text()
-                        _LOGGER.error("Logare eșuată (Status %s). Răspuns server: %s", resp.status, html_error[:300])
+                # Facem un apel de test către lista de contracte folosind cookie-ul tău
+                async with session.get(URL_CONTRACT, headers=headers) as resp:
+                    if resp.status != 200:
+                        _LOGGER.error("Eroare la validare cookie. Status: %s", resp.status)
                         raise ValueError("invalid_auth")
 
-            # Extragem cookie-urile rezultate în urma logării
-            cookies_dict = session.cookie_jar.filter_cookies(LOGIN_URL)
-            cookie_string = "; ".join([f"{key}={morsel.value}" for key, morsel in cookies_dict.items()])
-            
-            if not cookie_string:
-               raise ValueError("Nu s-au putut prelua cookie-urile de sesiune.")
-
-            # Setăm headerul cu noul cookie pentru cererea următoare
-            headers["Cookie"] = cookie_string
-            # Trebuie să modificăm Content-Type-ul înapoi în ceva standard pentru API-uri
-            headers["Accept"] = "application/json, text/plain, */*"
-
-            # Pasul 2: Aflăm codul de client și contractul.
-            # Acum că suntem logați, apelăm direct lista de contracte (exact cum face și site-ul)
-            with async_timeout.timeout(15):
-                async with session.get(CONTRACTS_URL, headers=headers) as resp_contract:
-                    if resp_contract.status != 200:
-                         raise ValueError(f"Eroare extragere contract: {resp_contract.status}")
-                    
-                    contracte_data = await resp_contract.json()
+                    contracte_data = await resp.json()
                     
                     if not contracte_data or len(contracte_data) == 0:
-                         raise ValueError("Nu s-au găsit contracte asociate acestui cont.")
-                    
-                    # Extragem primul contract găsit
-                    cod_client = str(contracte_data[0].get("codClient"))
-                    nr_contract = str(contracte_data[0].get("nrContract"))
+                        raise ValueError("invalid_auth")
 
-                    # Returnăm datele structurate frumos pentru a fi salvate în Home Assistant
+                    # Extragem numele clientului pentru a-l pune frumos ca titlu în HA
+                    client_name = contracte_data[0].get("denClient", "Client AC Ilfov")
+                    
                     return {
-                        "title": email,
-                        "cookies": cookie_string,
-                        "cod_client": cod_client,
-                        "nr_contract": nr_contract
+                        "title": f"{client_name} ({data['cod_client']})",
+                        "cookies": data["cookies"],
+                        "cod_client": data["cod_client"],
+                        "nr_contract": data["nr_contract"]
                     }
 
-    except aiohttp.ClientError as err:
-        _LOGGER.error("Eroare de conexiune la logare: %s", err)
+    except aiohttp.ClientError:
         raise ConnectionError("cannot_connect")
     except ValueError as val_err:
-        raise val_err # Rethrow pentru erorile noastre specifice
+        raise val_err
     except Exception as exc:
         _LOGGER.error("Eroare neprevăzută la logare: %s", exc)
         raise Exception("unknown")
+
 
 class ACIlfovConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Gestionează fluxul de configurare pentru AC Ilfov în UI."""
@@ -108,24 +71,24 @@ class ACIlfovConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
-            # Verificăm dacă contul a mai fost adăugat (să nu avem duplicate)
-            await self.async_set_unique_id(user_input["email"])
+            # Setează ID-ul unic pe baza codului de client
+            await self.async_set_unique_id(user_input["cod_client"])
             self._abort_if_unique_id_configured()
 
             try:
-                # Încercăm să validăm credențialele
+                # Testează cookie-ul
                 info = await validate_input(self.hass, user_input)
                 
-                # Dacă logarea reușește, creăm integrarea
+                # Crează integrarea!
                 return self.async_create_entry(title=info["title"], data=info)
-            except ValueError as err:
-                errors["base"] = str(err) 
+            except ValueError:
+                errors["base"] = "invalid_auth"
             except ConnectionError:
-                 errors["base"] = "cannot_connect"
+                errors["base"] = "cannot_connect"
             except Exception:
                 errors["base"] = "unknown"
 
-        # Afișăm formularul
+        # Afișăm formularul cu cele 3 câmpuri
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )

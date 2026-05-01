@@ -2,21 +2,22 @@
   "config": {
     "step": {
       "user": {
-        "title": "Autentificare AC Ilfov",
-        "description": "Introduceți adresa de email și parola folosite pe portalul acilfov.emsys.ro.",
+        "title": "Configurare AC Ilfov",
+        "description": "Introduceți datele extrase din browser (F12 -> Network).",
         "data": {
-          "email": "Adresă de Email",
-          "password": "Parolă"
+          "cookies": "Cookie de sesiune complet (SELF_UTI_COOKIE=...)",
+          "cod_client": "Cod Client (Ex: 37843)",
+          "nr_contract": "Număr Contract (Ex: 79)"
         }
       }
     },
     "error": {
       "cannot_connect": "Nu m-am putut conecta la serverul AC Ilfov.",
-      "invalid_auth": "Email sau parolă incorecte.",
+      "invalid_auth": "Cookie invalid/expirat sau detalii incorecte.",
       "unknown": "A apărut o eroare neașteptată."
     },
     "abort": {
-      "already_configured": "Acest cont este deja configurat."
+      "already_configured": "Acest cont este deja configurat în Home Assistant."
     }
   }
 }
