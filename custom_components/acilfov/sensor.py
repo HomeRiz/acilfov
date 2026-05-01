@@ -11,11 +11,11 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     
     # AICI pui valorile copiate din browser
     # Formatul trebuie să fie: "NUME1=VALOARE1; NUME2=VALOARE2"
-    my_cookies = "SELF_UTI_COOKIE=xxxxxxx; sl-session=xxxxxxx"
+    my_cookies = config.get("cookies")
     
     # Datele identificate de tine în tab-ul Network
-    cod_client = "37843"
-    nr_contract = "79"
+    cod_client = config.get("cod_client")
+    nr_contract = config.get("nr_contract")
     
     async_add_entities([ACIlfovSensor(my_cookies, cod_client, nr_contract)], True)
 
