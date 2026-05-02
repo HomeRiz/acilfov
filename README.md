@@ -77,8 +77,8 @@ Pentru a trece de bariera Cloudflare, trebuie să te loghezi manual o singură d
 | Câmp | Descriere | Implicit |
 |------|-----------|----------|
 | **Cookies** | Textul lung extras din browser (F12) | — |
-| **Cod Client** | Codul tău de client (Ex: 37843) | — |
-| **Număr Contract** | Numărul contractului tău (Ex: 79) | — |
+| **Cod Client** | Codul tău de client (Ex: 1234) | — |
+| **Număr Contract** | Numărul contractului tău (Ex: 20) | — |
 
 ---
 
