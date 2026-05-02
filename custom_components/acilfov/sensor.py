@@ -2,7 +2,7 @@ import logging
 import async_timeout
 import aiohttp
 from datetime import datetime, timedelta
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity import Entity, DeviceInfo
 from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI, URL_CONTRACT
 
 _LOGGER = logging.getLogger(__name__)
@@ -10,7 +10,6 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Setarea platformei de senzori prin Config Flow (Interfața grafică)."""
     
-    # Acum preluăm datele direct din ce ai introdus în fereastra de instalare
     cookies = config_entry.data.get("cookies")
     cod_client = config_entry.data.get("cod_client")
     nr_contract = config_entry.data.get("nr_contract")
@@ -41,6 +40,17 @@ class ACIlfovBaseSensor(Entity):
 
     @property
     def extra_state_attributes(self): return self._attributes
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Leagă senzorul de un dispozitiv central în UI."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._cod)},
+            name=f"Cont AC Ilfov ({self._cod})",
+            manufacturer="Apa Canal Ilfov",
+            model="Portal Client EMSYS",
+            sw_version="1.1.0",
+        )
 
     @property
     def _headers(self):
