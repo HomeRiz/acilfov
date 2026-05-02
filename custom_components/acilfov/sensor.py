@@ -1,9 +1,10 @@
 import logging
 import async_timeout
 import aiohttp
+import calendar
 from datetime import datetime, timedelta
 from homeassistant.helpers.entity import Entity, DeviceInfo
-from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI, URL_CONTRACT
+from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI, URL_CONTRACT, URL_TRANSMITERE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,12 +19,13 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         _LOGGER.error("Date de configurare lipsă pentru AC Ilfov")
         return
 
-    # Încărcăm toți cei 4 senzori
+    # Acum încărcăm toți cei 5 senzori (inclusiv cel nou pentru Ultimul Index)
     sensors = [
         ACIlfovSoldSensor(cookies, cod_client, nr_contract),
         ACIlfovIndexSensor(cookies, cod_client),
-        ACIlfovContractSensor(cookies, cod_client),
-        ACIlfovLastPaymentSensor(cookies, cod_client, nr_contract)
+        ACIlfovContractSensor(cookies, cod_client, nr_contract),
+        ACIlfovLastPaymentSensor(cookies, cod_client, nr_contract),
+        ACIlfovUltimulIndexSensor(cookies, cod_client, nr_contract)
     ]
     async_add_entities(sensors, True)
 
@@ -49,7 +51,7 @@ class ACIlfovBaseSensor(Entity):
             name=f"Cont AC Ilfov ({self._cod})",
             manufacturer="Apa Canal Ilfov",
             model="Portal Client EMSYS",
-            sw_version="1.1.0",
+            sw_version="1.2.0",
         )
 
     @property
@@ -89,7 +91,7 @@ class ACIlfovIndexSensor(ACIlfovBaseSensor):
     @property
     def name(self): return "AC Ilfov Perioada Index"
     @property
-    def unique_id(self): return f"acilfov_index_{self._cod}"
+    def unique_id(self): return f"acilfov_perioada_index_{self._cod}"
     @property
     def icon(self): return "mdi:calendar-clock"
 
@@ -103,9 +105,13 @@ class ACIlfovIndexSensor(ACIlfovBaseSensor):
                             data = await resp.json()
                             self._state = data.get("start")
                             self._attributes["mesaj"] = data.get("response")
-        except Exception as e: _LOGGER.error("Eroare Index: %s", e)
+        except Exception as e: _LOGGER.error("Eroare Perioada Index: %s", e)
 
 class ACIlfovContractSensor(ACIlfovBaseSensor):
+    def __init__(self, cookie, cod, contract):
+        super().__init__(cookie, cod)
+        self._contract = contract
+
     @property
     def name(self): return "AC Ilfov Detalii Contract"
     @property
@@ -125,7 +131,11 @@ class ACIlfovContractSensor(ACIlfovBaseSensor):
                                 self._state = contract_data.get("stareContract", "Necunoscut")
                                 self._attributes["client"] = contract_data.get("denClient")
                                 self._attributes["adresa"] = contract_data.get("adrClient")
-                                self._attributes["numar_contract"] = contract_data.get("nrContract")
+                                
+                                # Adăugăm datele de identificare solicitate sub statusul contractului
+                                self._attributes["cod_client"] = self._cod
+                                self._attributes["numar_contract"] = self._contract
+                                self._attributes["id_contract_sistem"] = contract_data.get("idContract", "")
                                 
                                 raw_date = contract_data.get("dataIncContract", "")
                                 if raw_date and "/Date(" in raw_date:
@@ -197,4 +207,76 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
             self._attributes["document"] = last_row.get("documentPlata")
             self._attributes["metoda"] = last_row.get("canalIncasare")
         else:
-            _LOGGER.error("Plati: Lista este tot goală. Verifică dacă există plăți pe cont.")
+            _LOGGER.error("Plati: Lista este tot goală.")
+
+class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
+    """Noul senzor care extrage datele reale de transmitere (apometru, index, zile rămase)."""
+    def __init__(self, cookie, cod, contract):
+        super().__init__(cookie, cod)
+        self._contract = contract
+
+    @property
+    def name(self): return "AC Ilfov Ultimul Index"
+    @property
+    def unique_id(self): return f"acilfov_ultimul_index_{self._cod}"
+    @property
+    def unit_of_measurement(self): return "m³"
+    @property
+    def icon(self): return "mdi:counter"
+
+    async def async_update(self):
+        url = URL_TRANSMITERE
+        
+        headers = self._headers.copy()
+        # Modificăm headerul strict pentru acest apel POST
+        headers.update({
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "codclient": str(self._cod),
+            "nrcontract": str(self._contract)
+        })
+
+        payload = {
+            "$qd": "false",
+            "$action": "LOAD_RECORDS",
+            "$locale": "en",
+            "$ls": "false",
+            "$to": "500"
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                with async_timeout.timeout(15):
+                    async with session.post(url, headers=headers, data=payload) as resp:
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            if data and data.get("records") and len(data["records"]) > 0:
+                                row = data["records"][0].get("row", {})
+                                
+                                # Extragem Indexul și Seria Contorului
+                                self._state = row.get("indexVechi")
+                                self._attributes["serie_contor"] = row.get("contor", "Necunoscut")
+                                self._attributes["id_contor_instalat"] = row.get("idContorInstalat", "")
+                                
+                                # Sistem Calendaristic Inteligent
+                                now = datetime.now()
+                                try:
+                                    zi_inc = int(row.get("ziInc", 25))
+                                except (ValueError, TypeError):
+                                    zi_inc = 25
+                                    
+                                # Aflăm ultima zi din lună folosind modulul 'calendar'
+                                _, last_day = calendar.monthrange(now.year, now.month)
+                                
+                                self._attributes["zi_deschidere"] = zi_inc
+                                self._attributes["zi_inchidere"] = last_day
+                                
+                                if now.day < zi_inc:
+                                    zile_pana_deschidere = zi_inc - now.day
+                                    self._attributes["status_fereastra"] = f"Închisă (se deschide în {zile_pana_deschidere} zile)"
+                                    self._attributes["zile_ramase"] = 0
+                                else:
+                                    zile_ramase = (last_day - now.day) + 1
+                                    self._attributes["status_fereastra"] = "Deschisă (Poți trimite indexul)"
+                                    self._attributes["zile_ramase"] = zile_ramase
+                                    
+        except Exception as e: _LOGGER.error("Eroare Ultimul Index: %s", e)
