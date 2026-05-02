@@ -231,10 +231,24 @@ class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
     def icon(self): return "mdi:counter"
 
     async def async_update(self):
-        await asyncio.sleep(2.5)
-        url = f"{URL_TRANSMITERE}?codClient={self._cod}&nrContract={self._contract}"
+        await asyncio.sleep(1) # Pauză pentru anti-spam
+        
+        url = URL_CONSUM
+        
+        # Exact ca la Plăți, serverul EMSYS are nevoie de o dată de început și sfârșit pentru a rula!
+        now = datetime.utcnow()
+        start_date = now - timedelta(days=365) # Extragem istoricul pe ultimul an
+        date_format = '%a, %d %b %Y %H:%M:%S GMT'
+        
         headers = self._headers.copy()
-        headers.update({"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"})
+        headers.update({
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", 
+            "codclient": str(self._cod), 
+            "nrcontract": str(self._contract),
+            "startdate": start_date.strftime(date_format),
+            "enddate": now.strftime(date_format)
+        })
+        
         payload = {"$qd": "false", "$action": "LOAD_RECORDS", "$locale": "en", "$ls": "false", "$to": "500"}
 
         try:
@@ -245,12 +259,43 @@ class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
                             data = await resp.json(content_type=None)
                             if data and data.get("records") and len(data["records"]) > 0:
                                 row = data["records"][0].get("row", {})
-                                idx = row.get("indexVechi")
-                                self._state = idx if idx is not None else 0
+                                
+                                idx_nou = row.get("indexNou")
+                                idx_vechi = row.get("indexVechi")
+                                
+                                # Verificăm logic care este ultimul index disponibil
+                                if idx_nou is not None:
+                                    self._state = idx_nou
+                                elif idx_vechi is not None:
+                                    self._state = idx_vechi
+                                else:
+                                    self._state = "Estimat (Fără Index)"
+                                
+                                # Adăugăm datele extra
+                                self._attributes["serie_contor"] = row.get("contor", "Necunoscut")
+                                self._attributes["cantitate_consumata"] = f"{row.get('diferenta', 0)} m³" if row.get("diferenta") is not None else "N/A"
+                                self._attributes["tip_consum"] = row.get("tipConsum", "Necunoscut")
+                                self._attributes["factura_asociata"] = row.get("factura", "N/A")
+                                self._attributes["index_anterior"] = idx_vechi if idx_vechi is not None else "N/A"
+                                
+                                data_consum = row.get("dataConsum", "")
+                                if "/Date(" in data_consum:
+                                    ts = int(data_consum.replace("/Date(", "").replace(")/", "")) / 1000
+                                    self._attributes["data_transmiterii"] = datetime.fromtimestamp(ts).strftime('%d.%m.%Y')
+                                    
+                                data_emitere = row.get("dataEmitere", "")
+                                if "/Date(" in data_emitere:
+                                    ts = int(data_emitere.replace("/Date(", "").replace(")/", "")) / 1000
+                                    self._attributes["data_emitere_factura"] = datetime.fromtimestamp(ts).strftime('%d.%m.%Y')
                             else:
                                 self._state = "Fără istoric"
-                        else: self._state = "Eroare API"
-        except Exception as e: _LOGGER.error("Eroare Ultimul Index: %s", e)
+                        else: 
+                            self._state = "Eroare API"
+                            text_eroare = await resp.text()
+                            _LOGGER.error(f"Eroare API la Ultimul Index. Status: {resp.status} - Răspuns server EMSYS: {text_eroare}")
+        except Exception as e: 
+            _LOGGER.error("Eroare conexiune Ultimul Index: %s", e)
+            self._state = "Eroare Conexiune"
 
 class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     def __init__(self, cookie, cod, contract):
