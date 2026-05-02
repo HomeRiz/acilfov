@@ -5,7 +5,7 @@ import asyncio
 import calendar
 from datetime import datetime, timedelta
 from homeassistant.helpers.entity import Entity, DeviceInfo
-from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI, URL_CONTRACT, URL_TRANSMITERE
+from .const import DOMAIN, URL_SOLD, URL_INDEX_PERIOD, URL_PLATI, URL_CONTRACT, URL_TRANSMITERE, URL_CONSUM
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,19 +20,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         _LOGGER.error("Date de configurare lipsă pentru AC Ilfov")
         return
 
+    # Lista curată, strict cu cei 8 senzori doriți
     sensors = [
         ACIlfovContractSensor(cookies, cod_client, nr_contract),
         ACIlfovStaticSensor(cod_client, "AC Ilfov Numar Contract", nr_contract, "mdi:file-sign"),
         ACIlfovStaticSensor(cod_client, "AC Ilfov Cod Client", cod_client, "mdi:identifier"),
-        ACIlfovSerieContorSensor(cookies, cod_client, nr_contract),
-        ACIlfovIdContorSensor(cookies, cod_client, nr_contract),
         ACIlfovIndexSensor(cookies, cod_client),
-        ACIlfovZileFereastraSensor(cookies, cod_client),  # Senzor local, fără API
+        ACIlfovZileFereastraSensor(cod_client),
         ACIlfovUltimulIndexSensor(cookies, cod_client, nr_contract),
         ACIlfovLastPaymentSensor(cookies, cod_client, nr_contract),
         ACIlfovSoldSensor(cookies, cod_client, nr_contract)
     ]
     async_add_entities(sensors, True)
+
 
 class ACIlfovBaseSensor(Entity):
     def __init__(self, cookie, cod):
@@ -54,7 +54,7 @@ class ACIlfovBaseSensor(Entity):
             name=f"Cont AC Ilfov ({self._cod})",
             manufacturer="Apa Canal Ilfov",
             model="Portal Client EMSYS",
-            sw_version="1.5.0",
+            sw_version="1.1.0",
         )
 
     @property
@@ -62,7 +62,7 @@ class ACIlfovBaseSensor(Entity):
         return {
             "Cookie": self._cookie,
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "*/*"
+            "Accept": "application/json, text/plain, */*"
         }
 
 class ACIlfovStaticSensor(ACIlfovBaseSensor):
@@ -81,6 +81,7 @@ class ACIlfovStaticSensor(ACIlfovBaseSensor):
 
     async def async_update(self):
         pass
+
 
 class ACIlfovContractSensor(ACIlfovBaseSensor):
     def __init__(self, cookie, cod, contract):
@@ -106,67 +107,6 @@ class ACIlfovContractSensor(ACIlfovBaseSensor):
                                 self._attributes["titular"] = data[0].get("denClient")
         except Exception as e: _LOGGER.error("Eroare Contract: %s", e)
 
-class ACIlfovSerieContorSensor(ACIlfovBaseSensor):
-    def __init__(self, cookie, cod, contract):
-        super().__init__(cookie, cod)
-        self._contract = contract
-
-    @property
-    def name(self): return "AC Ilfov Contor"
-    @property
-    def unique_id(self): return f"acilfov_serie_contor_{self._cod}"
-    @property
-    def icon(self): return "mdi:barcode"
-
-    async def async_update(self):
-        await asyncio.sleep(0.5)
-        # Acum URL-ul este corectat!
-        url = f"{URL_TRANSMITERE}?codClient={self._cod}&nrContract={self._contract}"
-        headers = self._headers.copy()
-        headers.update({"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"})
-        payload = {"$qd": "false", "$action": "LOAD_RECORDS", "$locale": "en", "$ls": "false", "$to": "500"}
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                with async_timeout.timeout(15):
-                    async with session.post(url, headers=headers, data=payload) as resp:
-                        if resp.status == 200:
-                            data = await resp.json(content_type=None)
-                            if data and data.get("records") and len(data["records"]) > 0:
-                                self._state = data["records"][0].get("row", {}).get("contor", "Necunoscut")
-                            else: self._state = "Fără date"
-        except Exception as e: _LOGGER.error("Eroare Contor: %s", e)
-
-class ACIlfovIdContorSensor(ACIlfovBaseSensor):
-    def __init__(self, cookie, cod, contract):
-        super().__init__(cookie, cod)
-        self._contract = contract
-
-    @property
-    def name(self): return "AC Ilfov ID Contor Instalat"
-    @property
-    def unique_id(self): return f"acilfov_id_contor_{self._cod}"
-    @property
-    def icon(self): return "mdi:identifier"
-
-    async def async_update(self):
-        await asyncio.sleep(1.5)
-        # Acum URL-ul este corectat!
-        url = f"{URL_TRANSMITERE}?codClient={self._cod}&nrContract={self._contract}"
-        headers = self._headers.copy()
-        headers.update({"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"})
-        payload = {"$qd": "false", "$action": "LOAD_RECORDS", "$locale": "en", "$ls": "false", "$to": "500"}
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                with async_timeout.timeout(15):
-                    async with session.post(url, headers=headers, data=payload) as resp:
-                        if resp.status == 200:
-                            data = await resp.json(content_type=None)
-                            if data and data.get("records") and len(data["records"]) > 0:
-                                self._state = data["records"][0].get("row", {}).get("idContorInstalat", "Necunoscut")
-                            else: self._state = "Fără date"
-        except Exception as e: _LOGGER.error("Eroare ID Contor: %s", e)
 
 class ACIlfovIndexSensor(ACIlfovBaseSensor):
     @property
@@ -187,10 +127,10 @@ class ACIlfovIndexSensor(ACIlfovBaseSensor):
                             self._state = data.get("start", "25")
         except Exception as e: _LOGGER.error("Eroare Perioada Index: %s", e)
 
+
 class ACIlfovZileFereastraSensor(ACIlfovBaseSensor):
-    """Senzor 100% LOCAL (nu face cereri la API). Calculează matematic zilele din calendar."""
-    def __init__(self, cookie, cod):
-        super().__init__("dummy", cod) # Nu are nevoie de cookie
+    def __init__(self, cod):
+        super().__init__("dummy", cod)
 
     @property
     def name(self): return "AC Ilfov Zile Transmitere"
@@ -202,19 +142,18 @@ class ACIlfovZileFereastraSensor(ACIlfovBaseSensor):
     async def async_update(self):
         now = datetime.now()
         zi_inc = 25
-        
-        # Aflăm câte zile are luna curentă (28, 29, 30, 31)
         _, last_day = calendar.monthrange(now.year, now.month)
         
         if now.day < zi_inc:
-            zile_pana_deschidere = zi_inc - now.day
-            self._state = f"Începe în {zile_pana_deschidere} zile"
+            zile_pana = zi_inc - now.day
+            self._state = f"Începe în {zile_pana} zile"
         else:
-            zile_ramase = last_day - now.day
-            if zile_ramase == 0:
+            zile_ramase = (last_day - now.day) + 1
+            if zile_ramase == 1:
                 self._state = "Ultima zi!"
             else:
-                self._state = f"Deschis (încă {zile_ramase} zile)"
+                self._state = f"Deschis ({zile_ramase} zile rămase)"
+
 
 class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
     def __init__(self, cookie, cod, contract):
@@ -225,19 +164,24 @@ class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
     def name(self): return "AC Ilfov Ultimul Index"
     @property
     def unique_id(self): return f"acilfov_ultimul_index_{self._cod}"
+    
     @property
-    def unit_of_measurement(self): return "m³" if isinstance(self._state, (int, float)) else None
+    def unit_of_measurement(self): 
+        # Protecție pentru "Unavailable": Adăugăm m³ DOAR dacă valoarea este număr!
+        if isinstance(self._state, (int, float)):
+            return "m³"
+        if isinstance(self._state, str) and self._state.replace('.', '', 1).isdigit():
+            return "m³"
+        return None
+        
     @property
     def icon(self): return "mdi:counter"
 
     async def async_update(self):
-        await asyncio.sleep(1) # Pauză pentru anti-spam
-        
+        await asyncio.sleep(1)
         url = URL_CONSUM
-        
-        # Exact ca la Plăți, serverul EMSYS are nevoie de o dată de început și sfârșit pentru a rula!
         now = datetime.utcnow()
-        start_date = now - timedelta(days=365) # Extragem istoricul pe ultimul an
+        start_date = now - timedelta(days=365)
         date_format = '%a, %d %b %Y %H:%M:%S GMT'
         
         headers = self._headers.copy()
@@ -263,7 +207,6 @@ class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
                                 idx_nou = row.get("indexNou")
                                 idx_vechi = row.get("indexVechi")
                                 
-                                # Verificăm logic care este ultimul index disponibil
                                 if idx_nou is not None:
                                     self._state = idx_nou
                                 elif idx_vechi is not None:
@@ -271,7 +214,6 @@ class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
                                 else:
                                     self._state = "Estimat (Fără Index)"
                                 
-                                # Adăugăm datele extra
                                 self._attributes["serie_contor"] = row.get("contor", "Necunoscut")
                                 self._attributes["cantitate_consumata"] = f"{row.get('diferenta', 0)} m³" if row.get("diferenta") is not None else "N/A"
                                 self._attributes["tip_consum"] = row.get("tipConsum", "Necunoscut")
@@ -292,10 +234,11 @@ class ACIlfovUltimulIndexSensor(ACIlfovBaseSensor):
                         else: 
                             self._state = "Eroare API"
                             text_eroare = await resp.text()
-                            _LOGGER.error(f"Eroare API la Ultimul Index. Status: {resp.status} - Răspuns server EMSYS: {text_eroare}")
+                            _LOGGER.error(f"Eroare API la Ultimul Index. Status: {resp.status} - Răspuns: {text_eroare}")
         except Exception as e: 
             _LOGGER.error("Eroare conexiune Ultimul Index: %s", e)
             self._state = "Eroare Conexiune"
+
 
 class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     def __init__(self, cookie, cod, contract):
@@ -312,6 +255,7 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
     def icon(self): return "mdi:cash-check"
 
     async def async_update(self):
+        await asyncio.sleep(2)
         url = URL_PLATI
         now = datetime.utcnow()
         start_date = now - timedelta(days=180)
@@ -331,6 +275,7 @@ class ACIlfovLastPaymentSensor(ACIlfovBaseSensor):
                                 last_row = data["records"][0].get("row", {})
                                 self._state = last_row.get("valoarePlata")
         except Exception as e: _LOGGER.error("Eroare Plata: %s", e)
+
 
 class ACIlfovSoldSensor(ACIlfovBaseSensor):
     def __init__(self, cookie, cod, contract):
