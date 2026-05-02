@@ -41,7 +41,7 @@ Autentificarea se face furnizând un Cookie valid obținut anterior din browser-
 
 1. Deschide HACS în Home Assistant
 2. Click pe cele 3 puncte (⋮) din colțul dreapta sus → **Custom repositories**
-3. Adaugă URL-ul repository-ului tău (ex: `https://github.com/numele-tau/acilfov`)
+3. Adaugă URL-ul repository-ului tău (ex: `https://github.com/HomeRiz/acilfov`)
 4. Categorie: **Integration**
 5. Click **Add** → găsește „AC Ilfov" → **Install**
 6. Restartează Home Assistant
